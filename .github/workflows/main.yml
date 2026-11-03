@@ -43,13 +43,21 @@ jobs:
         with:
           exclude_inputs: bundle_id,display_name
 
-      - name: Validate IPA URL
+      - name: Normalize and Validate IPA URL
+        id: ipa
+        env:
+          RAW_URL: ${{ inputs.ipa_url }}
         run: |
-          curl -L -r 0-1023 -o sample.part "${{ inputs.ipa_url }}" > /dev/null 2>&1
+          # Automatically convert Dropbox preview links (dl=0) to direct download links (dl=1)
+          DIRECT_URL=$(echo "$RAW_URL" | sed -E 's/([?&])dl=0/\1dl=1/')
+          echo "::add-mask::$DIRECT_URL"
+          echo "url=$DIRECT_URL" >> "$GITHUB_OUTPUT"
+
+          curl -fL -r 0-1023 -o sample.part "$DIRECT_URL" > /dev/null 2>&1
           
           file_type=$(file --mime-type -b sample.part)
 
-          if [[ "$file_type" != "application/x-ios-app" && "$file_type" != "application/zip" ]]; then
+          if [[ "$file_type" != "application/x-ios-app" && "$file_type" != "application/zip" && "$file_type" != "application/octet-stream" ]]; then
             echo "::error::Validation failed: The file is not a valid IPA file. Detected type: $file_type."
             exit 1
           fi
@@ -94,7 +102,7 @@ jobs:
         run: pipx install --force https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
 
       - name: Download YouTube Music
-        run: wget "${{ inputs.ipa_url }}" --no-verbose -O ytm.ipa
+        run: curl -fL "${{ steps.ipa.outputs.url }}" -o ytm.ipa
 
       - name: Build Tweak for Sideloading
         run: |
@@ -103,7 +111,7 @@ jobs:
           mv packages/*.deb ../ytmult.deb
 
       - name: Inject tweak into provided IPA
-        run: cyan -i ytm.ipa -o YTMusicUltimate.ipa -uwsf ytmult.deb -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }} 
+        run: cyan -i ytm.ipa -o YTMusicUltimate.ipa -uwsf ytmult.deb -n "${{ inputs.display_name }}" -b "${{ inputs.bundle_id }}"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2.5.0
